@@ -1,0 +1,59 @@
+---
+title: "Fitting ideal observer models. Experiment 1: three game objects."
+format: html
+---
+
+```{r}
+#| warning: false
+#| message: false
+library(tidyverse)
+
+library(cmdstanr)
+```
+
+## Import proprocessed data
+```{r}
+stan_data <- readRDS("Data/exp1-three-objects/exp1-standata.RDS")
+```
+
+
+## Compiling the models
+```{r}
+model_names <- c("[set-none]_[objrepr-common]_[objdelta-common]",
+                 "[set-none]_[objrepr-common]_[objdelta-perset]",
+                 "[set-none]_[objrepr-perset]_[objdelta-common]",
+                 "[set-none]_[objrepr-perset]_[objdelta-perset]",
+                 
+                 "[set-fixed_common]_[objrepr-perset]_[objdelta-common]",
+                 
+                 "[set-fixed_perset]_[objrepr_perset]_[objdelta-common]",
+                 
+                 "[set-history_objdelta]_[objrepr-perset]_[objdelta-common]",
+                 "[set-history_setdelta]_[objrepr-perset]_[objdelta-common]",
+                 "[set-history_setdelta]_[objrepr-perset]_[objdelta-perset]")
+
+models <- purrr::map(model_names, ~cmdstan_model(paste0("Stan/exp1-three-objects/", ., ".stan")))
+names(models) <- model_names
+```
+
+## Fitting models
+```{r}
+for(im in 1:length(model_names)) {
+  cat(model_names[im], "\n")
+  fit <- models[[im]]$sample(data = data_for_stan,
+                             chains = 4,
+                             parallel_chains = future::availableCores())
+  
+  # loo
+  fit_loo <- fit$loo()
+  saveRDS(fit_loo,  fs::path("Loos/exp1-three-objects", paste0("loo_", model_names[im], ".RDS")))
+  
+  # draws
+  draws <- fit$draws(format = "df") |> 
+           as_tibble() |>
+           select(-starts_with("log_lik"))
+  
+  saveRDS(draws,  fs::path("Draws/exp1-three-objects", paste0("draws_", model_names[im], ".RDS")))
+}
+```
+
