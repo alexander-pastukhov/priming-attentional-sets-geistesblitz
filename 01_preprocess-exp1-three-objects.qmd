@@ -1,0 +1,91 @@
+---
+title: "Import and preprocessing. Experiment 1: three game objects."
+format: html
+---
+
+```{r}
+#| warning: false
+#| message: false
+library(tidyverse)
+```
+
+## Import data
+
+```{r}
+results <-
+  read_csv("Data/exp1-three-objects/three-objects-2022-11-04.csv",
+           locale = locale(encoding = "UTF-8"),
+           col_types = cols(.default = col_skip(),
+                            participant.code = col_character(),
+                            player.attention_set = col_character(),
+                            player.objects = col_character(),
+                            player.object_colors = col_character(),
+                            player.direct_cues = col_double(),
+                            player.target = col_character(),
+                            player.target_color = col_character(),
+                            player.round_objects = col_character(),
+                            player.round_colors = col_character(),
+                            player.rt = col_double(),
+                            player.response = col_character(),
+                            player.block = col_double(),
+                            player.trial = col_double()
+                          )) |>
+
+  # drop player. prefix
+  rename_with(~stringr::str_remove(., "player.")) |>
+  
+  # drop non-response rows
+  drop_na(response) |>
+  
+  # dropping incomplete participants
+  group_by(participant.code) |>
+  mutate(nTrials = n()) |>
+  ungroup() |>
+  filter(nTrials == 640) |>
+  select(-nTrials) |>
+  
+  # turning participant and target into factors
+  mutate(participant.code = factor(participant.code),
+         participant.code = forcats::fct_inorder(participant.code),
+         target = factor(target),
+         response = factor(response, levels = levels(target))) |>
+  
+  # turn attention sets for trial and block into factors
+  rename(BlockAttentionSet = attention_set,
+         TrialAttentionSet = direct_cues) |>
+  mutate(BlockAttentionSet = factor(BlockAttentionSet, levels = c("Direct", "Indirect", "Mixed")),
+         SetNumber = factor(BlockAttentionSet == "Mixed", levels = c(FALSE, TRUE), labels = c("Single", "Dual")),
+         TrialAttentionSet = factor(TrialAttentionSet, levels = c(1, 0), labels = c("Direct", "Indirect")),
+         TrialBlockAttentionSet = glue::glue("{TrialAttentionSet}-{BlockAttentionSet}")) |>
+
+  # compute proportion of correct responses and convert RT
+  mutate(Correct = (target == response),
+         RT = rt / 1000, # now is seconds
+         logRT = log(RT))
+
+saveRDS(results, file = "Data/exp1-three-objects/exp1.RDS")
+```
+
+## Preparing data for stan
+
+```{r}
+data_for_stan <-
+  list(
+    FITTING_START_TRIAL = 5,
+
+    N =  nrow(results),
+    ObjN = length(levels(results$target)),
+    SetsN = length(levels(results$TrialAttentionSet)),
+    ParticipantsN = length(levels(results$participant.code)), 
+    
+    trial = results$trial,
+    logRT = results$logRT,
+    response = as.integer(results$response),
+    target_obj = as.integer(results$target),
+    correct = as.integer(results$Correct),
+    participant = as.integer(results$participant.code),
+    mixed_block = as.integer(results$BlockAttentionSet == "Mixed"),
+    trial_attention_set = as.integer(results$TrialAttentionSet)
+  )
+saveRDS(data_for_stan, file = "Data/exp1-three-objects/exp1-standata.RDS")
+```
