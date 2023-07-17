@@ -1,0 +1,315 @@
+---
+title: "Analysis. Experiment 1: three game objects."
+format: html
+---
+
+```{r}
+#| warning: false
+#| message: false
+library(cmdstanr)
+library(tidyverse)
+
+source("common.R")
+```
+
+## Comparing models via LOO
+
+```{r}
+loo_files <-fs::dir_ls("Loos/exp1-three-objects")
+model_names <- 
+  loo_files |>
+  fs::path_file() |>
+  fs::path_ext_remove() |>
+  stringr::str_remove("loo_")
+  
+loos <- purrr::map(loo_files, ~readRDS(.))
+names(loos) <- model_names
+
+loo::loo_compare(loos)
+loo::loo_model_weights(loos)
+```
+
+## Getting draws for the selected model
+
+```{r}
+if (fs::file_exists("Draws/exp1-three-objects/draws_[set-history_setdelta]_[objrepr-perset]_[objdelta-common].RDS")) {
+  draws <- readRDS("Draws/exp1-three-objects/draws_[set-history_setdelta]_[objrepr-perset]_[objdelta-common].RDS")  
+} else {
+  stop("No file with sampled draws. Please fit the model (execute the chunk below) or contact authors for sampled draws.")
+}
+```
+
+Emergency sampling if draws file is missing, disabled by default. Please note that the sampling could take at least a few hours.
+```{r eval=FALSE}
+stan_data <- readRDS("Data/exp1-three-objects/exp1-standata.RDS")
+
+model <- cmdstan_model("Stan/exp1-three-objects/[set-history_setdelta]_[objrepr-perset]_[objdelta-common].stan")
+
+fit <- model$sample(data = data_for_stan, chains = 4, parallel_chains = future::availableCores())
+
+draws <- fit$draws(format = "df") |> 
+         as_tibble() |>
+         select(-starts_with("log_lik"))
+```
+
+Extract predictions for log(RT) for posterior predictions
+```{r}
+# extract predictions for log(RT)
+predicted_logRT <-
+  draws |>
+  select(starts_with("logMu["))
+```
+
+## Import data and compute repetitions
+
+```{r}
+results <- 
+  readRDS("Data/exp1-three-objects/exp1.RDS") |>
+  
+  # compute repetition counts per block
+  group_by(participant.code, block) |>
+  mutate(RepetitionObject = compute_repetitions(target),
+         RepetitionSet = compute_repetitions(TrialAttentionSet)) |>
+  ungroup()
+```
+
+
+## Utility functions that compute repetition
+Utility functions that compute repetition based on prediction level (group or individual) and filter function
+```{r}
+compute_repetition_for_predictions <- function(df, predictedlogRT, repetition_var, filter_function, level) {
+    repetition_df <-
+    df |>
+    # repetition per participant
+    mutate(PredictedLogRT = predictedlogRT) |>
+    filter_function() |>
+    group_by_at(c("participant.code", "TrialBlockAttentionSet", paste0("Repetition", repetition_var))) |>
+    summarize(meanRT = exp(mean(PredictedLogRT)),
+              .groups = "drop")
+  
+  if (level == "group") {
+    repetition_df |>
+      
+    # average per group
+    group_by_at(c("TrialBlockAttentionSet", paste0("Repetition", repetition_var))) |>
+    summarise(meanRT = mean(meanRT), .groups = "drop")
+  } else { # |"participant"
+    repetition_df
+  }
+}
+
+sample_repetition <- function(df, repetition_var, filter_function, level) {
+  repetition_df <-
+    df |>
+    sample_frac(size = 1, replace = TRUE) |>
+    filter_function() |>
+    group_by_at(c("participant.code", "TrialBlockAttentionSet", paste0("Repetition", repetition_var))) |>
+    summarize(meanRT = exp(mean(logRT)),
+              .groups = "drop")
+  
+  if (level == "group") {
+    repetition_df |>
+
+    # average per group
+    group_by_at(c("TrialBlockAttentionSet", paste0("Repetition", repetition_var))) |>
+    summarise(meanRT = mean(meanRT), .groups = "drop") 
+  } else { # |"participant"
+    repetition_df
+  }
+}
+```
+
+Wrappers to compute averages
+```{r}
+compute_average_predicted_repetition <- function(repetition_var, filter_function, level, R=NULL) {
+  rows_to_use <- 1:nrow(predicted_logRT)
+  if (!is.null(R)) {
+    rows_to_use <- sample(rows_to_use, R, replace = FALSE)
+  }
+  
+  # prediction per sample
+  predictions_df <- purrr::map_dfr(rows_to_use, 
+                                  ~compute_repetition_for_predictions(results,
+                                                                      as_vector(predicted_logRT[., ]),
+                                                                      repetition_var,
+                                                                      filter_function,
+                                                                      level),
+                                  .progress = TRUE)
+  
+  # averages
+  if (level == 'group') {
+    predictions_df |>
+      group_by_at(c("TrialBlockAttentionSet", paste0("Repetition", repetition_var))) |>
+      summarise(Avg = mean(meanRT),
+                LowerCI = lower_ci(meanRT),
+                UpperCI = upper_ci(meanRT),
+                .groups = "drop")
+  } else {
+    predictions_df |>
+      group_by_at(c("participant.code", "TrialBlockAttentionSet", paste0("Repetition", repetition_var))) |>
+      summarise(Avg = mean(meanRT),
+                LowerCI = lower_ci(meanRT),
+                UpperCI = upper_ci(meanRT),
+                .groups = "drop")
+  }
+}
+
+sample_average_repetition <- function(repetition_var, filter_function, level, R=1000) {
+  # sample
+  sampled_repetition_df <- purrr::map_dfr(1:R,
+                                          ~sample_repetition(results,
+                                                             repetition_var,
+                                                             filter_function,
+                                                             level),
+                                          .progress = TRUE)
+
+  # averages
+  if (level == 'group') {
+    sampled_repetition_df |>
+      group_by_at(c("TrialBlockAttentionSet", paste0("Repetition", repetition_var))) |>
+      summarise(Avg = mean(meanRT),
+                LowerCI = lower_ci(meanRT),
+                UpperCI = upper_ci(meanRT),
+                .groups = "drop")
+  } else {
+    sampled_repetition_df |>
+      group_by_at(c("participant.code", "TrialBlockAttentionSet", paste0("Repetition", repetition_var))) |>
+      summarise(Avg = mean(meanRT),
+                LowerCI = lower_ci(meanRT),
+                UpperCI = upper_ci(meanRT),
+                .groups = "drop")
+  }
+}
+```
+
+
+General plotting routine
+```{r}
+plot_repetition <- function(title, repetition_var, predictions_df, behaviour_df, level) {
+  plot <- 
+    ggplot(behaviour_df, aes_string(x = paste0("Repetition", repetition_var), y = "Avg", color = "TrialBlockAttentionSet")) +
+    geom_ribbon(data = predictions_df,
+                aes(ymin = LowerCI, ymax = UpperCI, fill = TrialBlockAttentionSet), alpha = 0.25, color = NA) +
+    geom_line() +
+    geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI)) +
+    geom_point() +
+    xlab(paste0(repetition_var, "repetition")) +
+    ylab("RT, geometric mean [s]") +
+    theme(legend.position = "top", strip.background = element_blank(), strip.text = element_blank()) +
+    labs(title = title)
+  
+  if (level == "group") {
+    plot <- plot + facet_wrap(.~TrialBlockAttentionSet, ncol = length(unique(behaviour_df$TrialBlockAttentionSet)), scales = "free_y")
+  } else { # "participant"
+    plot <- plot + facet_wrap(participant.code~TrialBlockAttentionSet, ncol = length(unique(behaviour_df$TrialBlockAttentionSet)), scales = "free_y")
+  }
+  
+  plot
+}
+```
+
+## Repetition priming: real vs. ideal observers
+
+```{r}
+Rpredict <- 100 # NULL (all) for final
+Rsample <- 100  # 2000 for final
+```
+
+### Repetition of both object and set
+
+```{r}
+object_and_set_repetition_filter <- function(df) {
+  filter(df, RepetitionObject <= 3, RepetitionObject <= RepetitionSet, trial > 5)
+}
+```
+
+Individual participants
+```{r}
+avg_prediction_object_and_set <- compute_average_predicted_repetition("Object", object_and_set_repetition_filter, "participant", R=Rpredict)
+avg_bootstrap_object_and_set <- sample_average_repetition("Object", object_and_set_repetition_filter, "participant", R=Rsample)
+
+plot_repetition("Repetition of object and set",
+                "Object",
+                avg_prediction_object_and_set,
+                avg_bootstrap_object_and_set,
+                level = "participant")
+```
+
+
+Group averages
+```{r}
+avg_prediction_object_and_set_per_group <- compute_average_predicted_repetition(object_and_set_repetition_filter, "group", R=100)
+avg_bootstrap_object_and_set_per_group <- sample_average_repetition(object_and_set_repetition_filter, "group", R=100)
+
+plot_repetition("Repetition of object and set", 
+                avg_prediction_object_and_set_per_group,
+                avg_bootstrap_object_and_set_per_group,
+                level = "group")
+```
+
+
+### Object repeats, set changes
+
+```{r}
+object_not_set_repetition_filter <- function(df) {
+  filter(df, RepetitionObject <= 3, RepetitionSet == 0, trial > 5)
+}
+```
+
+Individual participants
+
+```{r}
+avg_prediction_object_not_set <- compute_average_predicted_repetition(object_not_set_repetition_filter, "participant", R=Rpredict)
+avg_bootstrap_object_not_set <- sample_average_repetition(object_not_set_repetition_filter, "participant", R=Rsample)
+
+plot_repetition("Repetition of object not set", 
+                avg_prediction_object_not_set,
+                avg_bootstrap_object_not_set,
+                level = "participant")
+```
+
+Group averages
+```{r}
+avg_prediction_object_not_set_per_group <- compute_average_predicted_repetition(object_not_set_repetition_filter, "group", R=Rpredict)
+avg_bootstrap_object_not_set_per_group <- sample_average_repetition(object_not_set_repetition_filter, "group", R=Rsample)
+
+plot_repetition("Repetition of object not set", 
+                avg_prediction_object_not_set_per_group,
+                avg_bootstrap_object_not_set_per_group,
+                level = "group")
+```
+
+### Object changes, set repeats
+
+```{r}
+set_not_object_repetition_filter <- function(df) {
+  filter(df, RepetitionObject == 0, RepetitionSet <= 3, trial > 5)
+}
+```
+
+Individual participants
+
+```{r}
+avg_prediction_set_not_object <- compute_average_predicted_repetition("Set", set_not_object_repetition_filter, "participant", R=Rpredict)
+avg_bootstrap_set_not_object <- sample_average_repetition("Set", set_not_object_repetition_filter, "participant", R=Rsample)
+
+plot_repetition("Repetition of set not object",
+                "Set",
+                avg_prediction_set_not_object,
+                avg_bootstrap_set_not_object,
+                level = "participant")
+```
+
+Group averages
+```{r}
+avg_prediction_set_not_object_per_group <- compute_average_predicted_repetition("Set", set_not_object_repetition_filter, "group", R=Rpredict)
+avg_bootstrap_set_not_object_per_group <- sample_average_repetition("Set", set_not_object_repetition_filter, "group", R=Rsample)
+
+plot_repetition("Repetition of set not object",
+                "Set",
+                avg_prediction_set_not_object_per_group,
+                avg_bootstrap_set_not_object_per_group,
+                level = "group")
+```
+
+
