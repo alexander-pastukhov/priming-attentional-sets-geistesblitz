@@ -1,0 +1,65 @@
+---
+title: "Fitting ideal observer models. Experiment 3: nine game objects."
+format: html
+---
+
+```{r}
+#| warning: false
+#| message: false
+library(tidyverse)
+
+library(cmdstanr)
+```
+
+## Import proprocessed data
+```{r}
+stan_data <- readRDS("Data/exp3-nine-objects/exp3-standata.RDS")
+```
+
+
+## Compiling the models
+```{r}
+model_names <- c(
+                 "[set-none]_[objrepr-common]_[objdelta-common]_[color-none]",
+                 "[set-none]_[objrepr-perset]_[objdelta-common]_[color-none]",
+                 "[set-none]_[objrepr-common]_[objdelta-perset]_[color-none]",
+                 "[set-none]_[objrepr-perset]_[objdelta-perset]_[color-none]",
+                 
+                 "[set-fixed_common]_[objrepr-perset]_[objdelta-common]_[color-none]",
+                 "[set-fixed_perset]_[objrepr-perset]_[objdelta-common]_[color-none]",
+                 "[set-history_setdelta]_[objrepr-perset]_[objdelta-perset]_[color-none]",
+
+                 "[set-fixed_perset]_[objrepr-perset]_[objdelta-common]_[color-objboost]",
+                 "[set-fixed_perset]_[objrepr-perset]_[objdelta-common]_[color-common-objdelta]",
+                 "[set-fixed_perset]_[objrepr-perset]_[objdelta-common]_[color-perset-objdelta]",
+                 "[set-fixed_perset]_[objrepr-perset]_[objdelta-common]_[color-common-colordelta]",
+                 "[set-fixed_perset]_[objrepr-perset]_[objdelta-common]_[color-perset-colordelta]",
+                 
+                 "[set-history_setdelta]_[objrepr-perset]_[objdelta-common]_[color-perset-colordelta]",
+                 "[set-history_setdelta]_[objrepr-perset]_[objdelta-common]_[color-common-colordelta]",
+                 "[set-history_setdelta]_[objrepr-perset]_[objdelta-common]_[color-common-colordelta]_[distractors-presence]")
+
+models <- purrr::map(model_names, ~cmdstan_model(paste0("Stan/exp3-nine-objects/", ., ".stan")))
+names(models) <- model_names
+```
+
+## Fitting models
+```{r}
+for(im in 1:length(model_names)) {
+  cat(model_names[im], "\n")
+  fit <- models[[im]]$sample(data = data_for_stan,
+                             chains = 4,
+                             parallel_chains = future::availableCores())
+  
+  # loo
+  fit_loo <- fit$loo()
+  saveRDS(fit_loo,  fs::path("Loos/exp3-nine-objects", paste0("loo_", model_names[im], ".RDS")))
+  
+  # draws
+  draws <- fit$draws(format = "df") |> 
+           as_tibble() |>
+           select(-starts_with("log_lik"))
+  
+  saveRDS(draws,  fs::path("Draws/exp3-nine-objects", paste0("draws_", model_names[im], ".RDS")))
+}
+```
