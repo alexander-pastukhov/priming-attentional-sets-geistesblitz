@@ -1,0 +1,182 @@
+---
+title: "Import and preprocessing. Experiment 3: nine game objects."
+format: html
+---
+
+```{r}
+#| warning: false
+#| message: false
+library(tidyverse)
+```
+
+## Import data
+
+```{r}
+results <- read_csv("Data/exp3-nine-objects/nineobjectsvar_2023-05-31.csv",
+                    locale = locale(encoding = "UTF-8"),
+                           col_types = cols(.default = col_skip(),
+                                            participant.id_in_session = col_integer(),
+                                            participant.code = col_character(),
+                                            player.attention_set = col_character(),
+                                            player.objects = col_character(),
+                                            player.object_colors = col_character(),
+                                            player.direct_cues = col_double(),
+                                            player.target = col_character(),
+                                            player.target_color = col_character(),
+                                            player.round_objects = col_character(),
+                                            player.round_colors = col_character(),
+                                            player.rt = col_double(),
+                                            player.response = col_character(),
+                                            player.block = col_double(),
+                                            player.trial = col_double(),
+                                            session.is_demo = col_logical()
+                                          )) |>
+  
+  # drop player. prefix
+  rename_with(~stringr::str_remove(., "player.")) |>
+  
+  # drop demo sessions
+  filter(!session.is_demo) |>
+  select(-session.is_demo) |>
+  
+  # drop non-response rows
+  drop_na(response) |>
+  
+  # dropping incomplete participants
+  group_by(participant.code) |>
+  mutate(nTrials = n()) |>
+  ungroup() |>
+  filter(nTrials == 640) |> # complete valid experiments must be 64 trial  * 10 blocks
+  select(-nTrials) |>
+  
+  # expand round objects and colors into separate columns (easier to extract to matrix later)
+  separate(round_objects, into=sprintf("RoundObject%d", c(1:3)), sep = " ") |>
+  separate(round_colors, into=sprintf("RoundColor%d", c(1:3)), sep = " ")  |>
+  
+  # turning participant and target into factors
+  mutate(participant.code = factor(participant.code),
+         participant.code = forcats::fct_inorder(participant.code),
+         target = factor(target),
+         target_color = factor(target_color),
+         response = factor(response, levels = levels(target))) |>
+  
+  mutate(across(starts_with("RoundObject"), ~factor(., levels(target)))) |>
+  mutate(across(starts_with("RoundColor"), ~factor(., levels = levels(target_color)))) |>
+  
+  # turn attention sets for trial and block into factors
+  rename(BlockAttentionSet = attention_set,
+         TrialAttentionSet = direct_cues) |>
+  mutate(BlockAttentionSet = factor(BlockAttentionSet, levels = c("Direct", "Indirect", "Mixed")),
+         SetNumber = factor(BlockAttentionSet == "Mixed", levels = c(FALSE, TRUE), labels = c("Single", "Dual")),
+         TrialAttentionSet = factor(TrialAttentionSet, levels = c(1, 0), labels = c("Direct", "Indirect")),
+         TrialBlockAttentionSet = glue::glue("{TrialAttentionSet}-{BlockAttentionSet}")) |>
+
+  # compute proportion of correct responses and convert RT
+  mutate(Correct = (target == response),
+         RT = rt / 1000, # now is seconds
+         logRT = log(RT)) |>
+    
+  arrange(participant.code, block, trial)
+
+saveRDS(results, file = "Data/exp3-nine-objects/exp3.RDS")
+```
+
+## Preparing data for stan
+
+Computing object-color mapping, it is participant specific (order was shuffled)
+```{r}
+compute_object_color_mapping <- function(df) {
+  # matrix that labels objects of same color
+  
+  exp_objects <- str_split(df$objects[1], " ") |> as_vector() |> factor(levels = levels(df$target))
+  exp_i_objects <- as.integer(exp_objects)
+  exp_colors <- str_split(df$object_colors[1], " ") |> as_vector()
+  
+  colors_in_factor_order <- exp_colors
+  for(i in 1:length(exp_objects)) {
+    colors_in_factor_order[exp_i_objects[i]] <- exp_colors[i]
+  }
+  
+  colors_in_factor_order
+}
+
+object_colors <-   purrr::map(levels(results$participant.code),
+                              ~compute_object_color_mapping(filter(results, participant.code == .)))
+names(object_colors) <- levels(results$participant.code)
+```
+
+
+One-hot encoding for objects and colors
+```{r}
+is_target <- matrix(0, nrow = nrow(results), ncol = length(levels(results$target)))
+is_target_color <- matrix(0, nrow = nrow(results), ncol = length(levels(results$target_color)))
+
+
+is_round_object <- matrix(0, nrow = nrow(results), ncol = length(levels(results$target)))
+is_round_color <- matrix(0, nrow = nrow(results), ncol = length(levels(results$target_color)))
+
+is_same_color_as_target <- matrix(0, nrow = nrow(results), ncol = length(levels(results$target)))
+object_color <- matrix(0, nrow = nrow(results), ncol = length(levels(results$target)))
+
+
+for(irow in 1:nrow(results)) {
+  # target and its color
+  is_target[irow, as.integer(results$target[irow])] <- 1
+  is_target_color[irow, as.integer(results$target_color[irow])] <- 1
+  
+  # objects shown within the round
+  is_round_object[irow, as.integer(results$RoundObject1[irow])] <- 1
+  is_round_object[irow, as.integer(results$RoundObject2[irow])] <- 1
+  
+  # colors shown within the round
+  is_round_color[irow, as.integer(results$RoundColor1[irow])] <- 1
+  is_round_color[irow, as.integer(results$RoundColor2[irow])] <- 1
+  
+  # whether the object has the same color as target but is not a target on that trial
+  itarget <- as.integer(results$target[irow])
+  object_color_map <- object_colors[[results$participant.code[irow]]]
+  object_color_map_f <- factor(object_color_map, levels = levels(results$target_color))
+  for(iObj in 1:length(levels(results$target))) {
+    is_same_color_as_target[irow, iObj] <- (iObj != itarget) & (object_color_map[itarget] == object_color_map[iObj])
+    
+    object_color[irow, iObj] <- as.integer(object_color_map_f[iObj])
+  }
+}
+```
+
+Stan data
+```{r}
+data_for_stan <-
+  list(
+    FITTING_START_TRIAL = 5,
+    
+    N =  nrow(results),
+    ObjN = length(levels(results$target)),
+    ColorsN = length(levels(results$target_color)),
+    ObjectsInTrial = 3,
+    ColorsInTrial = 3,
+    SetsN = length(levels(results$TrialAttentionSet)),
+    ParticipantsN = length(levels(results$participant.code)),
+    
+    trial = results$trial,
+    logRT = results$logRT,
+    response = as.integer(results$response),
+    correct = as.integer(results$Correct),
+    participant = as.integer(results$participant.code),
+    
+    is_target = is_target,
+    is_target_color = is_target_color,
+
+    is_round_object = is_round_object,
+    is_round_color = is_round_color,
+    is_same_color_as_target = is_same_color_as_target,
+    
+    object_color = object_color,
+
+    mixed_block = as.integer(results$BlockAttentionSet == "Mixed"),
+    trial_attention_set = as.integer(results$TrialAttentionSet),
+    is_direct_attention_set = as.integer(results$TrialAttentionSet == "Direct")
+  )
+
+saveRDS(data_for_stan, file = "Data/exp3-nine-objects/exp3-standata.RDS")
+```

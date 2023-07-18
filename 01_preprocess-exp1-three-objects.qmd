@@ -28,9 +28,14 @@ results <-
                             player.rt = col_double(),
                             player.response = col_character(),
                             player.block = col_double(),
-                            player.trial = col_double()
+                            player.trial = col_double(),
+                            session.is_demo = col_logical()
                           )) |>
 
+  # drop demo sessions
+  filter(!session.is_demo) |>
+  select(-session.is_demo) |>
+  
   # drop player. prefix
   rename_with(~stringr::str_remove(., "player.")) |>
   
@@ -41,7 +46,7 @@ results <-
   group_by(participant.code) |>
   mutate(nTrials = n()) |>
   ungroup() |>
-  filter(nTrials == 640) |>
+  filter(nTrials == 640) |> # complete valid experiments must be 64 trial  * 10 blocks
   select(-nTrials) |>
   
   # turning participant and target into factors
