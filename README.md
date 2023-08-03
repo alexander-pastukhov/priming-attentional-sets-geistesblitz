@@ -1,2 +1,2 @@
-# priming-attentional-sets-gesitesblitz
-Priming of attentional sets, an experiment using Geistesblitz
+# Priming attentional sets
+Priming of attentional sets, an experiment using Geistesblitz game.
