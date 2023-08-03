@@ -20,7 +20,7 @@ source("common.R")
 
 ```{r}
 # load precomputed LOO
-loo_files <-fs::dir_ls("Loos/exp1-three-objects", glob = "*.RDS", type = "file")
+loo_files <-fs::dir_ls("Loos/exp1-three-objects", glob = "*loo_exp1_*.RDS", type = "file")
 model_names <- 
   loo_files |>
   fs::path_file() |>
@@ -29,28 +29,8 @@ model_names <-
 loos <- purrr::map(loo_files, ~readRDS(.))
 names(loos) <- model_names
 
-# compute model weight weight
-model_weights <- loo::loo_model_weights(loos)
-weights_df <-
-  tibble(Model = names(model_weights),
-         Weight = round(as.numeric(model_weights), 2))
-
-# compare models
-model_comparison <-
-  loo::loo_compare(loos) |>
-  as.data.frame() |>
-  rownames_to_column("Model") |>
-  select(Model, elpd_diff, se_diff) |>
-  mutate(across(elpd_diff:se_diff, ~round(., 2))) |>
-  mutate(dELPD = glue("{elpd_diff}±{se_diff}")) |>
-  select(-elpd_diff, -se_diff) |>
-  left_join(weights_df, by = "Model") |>
-  separate(Model, into = c("Set", "Object"), sep = "_") |>
-  mutate(across(Set:Object, ~str_remove_all(., "\\[|\\]"))) |>
-  mutate(across(Set:Object, ~str_remove_all(., "set-|obj-"))) 
-
-knitr::kable(model_comparison )
-clipr::write_clip(model_comparison)
+model_comparison <- compute_loo_summary_df(loos, components = c("Set", "Object"))
+model_comparison
 ```
 
 ## Getting draws for the selected model
@@ -186,7 +166,7 @@ if (fs::file_exists("Loos/exp1-three-objects/loo_object_and_set.RDS")) {
 if (fs::file_exists("Loos/exp1-three-objects/loo_object_and_set_table.RDS")) {
   loo_object_and_set_table <- readRDS("Loos/exp1-three-objects/loo_object_and_set_table.RDS")
 } else {
-  loo_object_and_set_table <- compute_loo_summary_df(loo_object_and_set)
+  loo_object_and_set_table <- compute_loo_summary_df(loo_object_and_set, components = c("Set", "Object"))
   saveRDS(loo_object_and_set_table, "Loos/exp1-three-objects/loo_object_and_set_table.RDS")
 }
 
