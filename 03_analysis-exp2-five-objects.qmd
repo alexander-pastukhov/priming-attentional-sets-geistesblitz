@@ -118,20 +118,6 @@ object_and_set_repetition_filter <- function(df) {
 }
 ```
 
-Individual participants
-```{r}
-#|eval: false
-avg_prediction_object_and_set <- compute_average_predicted_repetition("Object", object_and_set_repetition_filter, "participant", R=Rpredict)
-avg_bootstrap_object_and_set <- sample_average_repetition("Object", object_and_set_repetition_filter, "participant", R=Rsample)
-
-plot_repetition("Repetition of object and set",
-                "Object",
-                avg_prediction_object_and_set,
-                avg_bootstrap_object_and_set,
-                level = "participant")
-```
-
-
 Group averages
 ```{r}
 if (fs::file_exists("Averages/object-and-set-exp2-posterior.RDS")) {
@@ -180,20 +166,6 @@ loo_object_and_set_table
 object_not_set_repetition_filter <- function(df) {
   filter(df, RepetitionObject <= 3, RepetitionSet == 0, trial >= data_for_stan$FITTING_START_TRIAL)
 }
-```
-
-Individual participants
-
-```{r}
-#|eval: false
-avg_prediction_object_not_set <- compute_average_predicted_repetition("Object", object_not_set_repetition_filter, "participant", R=Rpredict)
-avg_bootstrap_object_not_set <- sample_average_repetition("Object", object_not_set_repetition_filter, "participant", R=Rsample)
-
-plot_repetition("Repetition of object not set",
-                "Object",
-                avg_prediction_object_not_set,
-                avg_bootstrap_object_not_set,
-                level = "participant")
 ```
 
 Group averages
@@ -247,20 +219,6 @@ set_not_object_repetition_filter <- function(df) {
 }
 ```
 
-Individual participants
-
-```{r}
-#|eval: false
-avg_prediction_set_not_object <- compute_average_predicted_repetition("Set", set_not_object_repetition_filter, "participant", R=Rpredict)
-avg_bootstrap_set_not_object <- sample_average_repetition("Set", set_not_object_repetition_filter, "participant", R=Rsample)
-
-plot_repetition("Repetition of set not object",
-                "Set",
-                avg_prediction_set_not_object,
-                avg_bootstrap_set_not_object,
-                level = "participant")
-```
-
 Group averages
 ```{r}
 if (fs::file_exists("Averages/set-not-object-exp2-posterior.RDS")) {
@@ -310,20 +268,6 @@ loo_set_not_object_table
 color_and_set_not_object_repetition_filter <- function(df) {
   filter(df, RepetitionObject == 0, RepetitionColor <= 3, RepetitionColor <= RepetitionSet, trial >= data_for_stan$FITTING_START_TRIAL)
 }
-```
-
-Individual participants
-
-```{r}
-#|eval: false
-avg_prediction_set_not_object <- compute_average_predicted_repetition("Set", set_not_object_repetition_filter, "participant", R=Rpredict)
-avg_bootstrap_set_not_object <- sample_average_repetition("Set", set_not_object_repetition_filter, "participant", R=Rsample)
-
-plot_repetition("Repetition of set not object",
-                "Set",
-                avg_prediction_set_not_object,
-                avg_bootstrap_set_not_object,
-                level = "participant")
 ```
 
 Group averages
