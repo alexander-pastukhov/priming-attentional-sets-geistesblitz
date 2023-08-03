@@ -9,36 +9,60 @@ format: html
 library(tidyverse)
 
 library(cmdstanr)
+library(glue)
+
+FORCE_RESAMPLE <- FALSE
 ```
 
 ## Import proprocessed data
 ```{r}
-stan_data <- readRDS("Data/exp2-five-objects/exp2-standata.RDS")
+data_for_stan <- readRDS("Data/exp2-five-objects/exp2-standata.RDS")
 ```
 
 
 ## Compiling the models
 ```{r}
-model_names <- c("[set-none]_[objrepr-common]_[objdelta-common]_[color-none]",
-                 "[set-none]_[objrepr-perset]_[objdelta-common]_[color-none]",
-                 "[set-none]_[objrepr-common]_[objdelta-perset]_[color-none]",
-                 "[set-none]_[objrepr-perset]_[objdelta-perset]_[color-none]",
+model_names <- c("[set-none]_[obj-common]_[color-none]",
+                 "[set-none]_[obj-perset]_[color-none]",
                  
-                 "[set-fixed_common]_[objrepr-perset]_[objdelta-common]_[color-none]",
-                 "[set-fixed_perset]_[objrepr-perset]_[objdelta-common]_[color-none]",
+                 
+                 
+                 "[set-same]_[obj-common]_[color-none]",
+                 "[set-same]_[obj-common]_[color-objboost]",
+                 "[set-same]_[obj-common]_[color-common]",
+                 "[set-same]_[obj-common]_[color-perset]",
+                 
+                 "[set-same]_[obj-perset]_[color-none]",
+                 "[set-same]_[obj-perset]_[color-objboost]",
+                 "[set-same]_[obj-perset]_[color-common]",
+                 "[set-same]_[obj-perset]_[color-perset]",
+                 
+                 
+                 
+                 "[set-different]_[obj-common]_[color-none]",
+                 "[set-different]_[obj-common]_[color-objboost]",
+                 "[set-different]_[obj-common]_[color-common]",
+                 "[set-different]_[obj-common]_[color-perset]",
+                 
+                 "[set-different]_[obj-perset]_[color-none]",
+                 "[set-different]_[obj-perset]_[color-objboost]",
+                 "[set-different]_[obj-perset]_[color-common]",
+                 "[set-different]_[obj-perset]_[color-perset]",
+                 
 
-                 "[set-fixed_perset]_[objrepr-perset]_[objdelta-common]_[color-objboost]",
-                 "[set-fixed_perset]_[objrepr-perset]_[objdelta-common]_[color-common-objdelta]",
-                 "[set-fixed_perset]_[objrepr-perset]_[objdelta-common]_[color-perset-objdelta]",
-                 "[set-fixed_perset]_[objrepr-perset]_[objdelta-common]_[color-common-colordelta]",
-                 "[set-fixed_perset]_[objrepr-perset]_[objdelta-common]_[color-perset-colordelta]", 
-                 
-                 "[set-fixed_perset]_[objrepr-perset]_[objdelta-common]_[color-common-colordelta]_[distractors-presence]",
-                 
-                 "[set-history_setdelta]_[objrepr-perset]_[objdelta-common]_[color-common-colordelta]",
-                 "[set-history_setdelta]_[objrepr-perset]_[objdelta-common]_[color-common-colordelta]_[distractors-presence]")
+                 "[set-memory]_[obj-common]_[color-none]",      
+                 "[set-memory]_[obj-common]_[color-objboost]",
+                 "[set-memory]_[obj-common]_[color-common]",
+                 "[set-memory]_[obj-common]_[color-perset]",
 
-models <- purrr::map(model_names, ~cmdstan_model(paste0("Stan/exp2-five-objects/", ., ".stan")))
+                 "[set-memory]_[obj-perset]_[color-none]",
+                 "[set-memory]_[obj-perset]_[color-objboost]",
+                 "[set-memory]_[obj-perset]_[color-common]",
+                 "[set-memory]_[obj-perset]_[color-perset]"
+                 )
+
+models <- purrr::map(model_names, ~cmdstan_model(glue("Stan/exp23/{.}.stan"),
+                                                 exe_file = glue("Stan/exp23/exe/{.}.stan")))
 names(models) <- model_names
 ```
 
@@ -46,19 +70,34 @@ names(models) <- model_names
 ```{r}
 for(im in 1:length(model_names)) {
   cat(model_names[im], "\n")
+  loo_filename <- fs::path("Loos/exp2-five-objects", glue("loo_exp2_{model_names[im]}.RDS"))
+  loglik_filename <- fs::path("LogLik/exp2-five-objects", glue("loglik_exp2_{model_names[im]}.RDS"))
+  draws_filename <- fs::path("Draws/exp2-five-objects", glue("draws_exp2_{model_names[im]}.RDS")) 
+  
+  if (fs::file_exists(loo_filename) & fs::file_exists(draws_filename) & !FORCE_RESAMPLE){
+    cat("    Already sampled, skipping...\n")
+    next
+  } 
+  
   fit <- models[[im]]$sample(data = data_for_stan,
                              chains = 4,
                              parallel_chains = future::availableCores())
-  
+
   # loo
   fit_loo <- fit$loo()
-  saveRDS(fit_loo,  fs::path("Loos/exp2-five-objects", paste0("loo_", model_names[im], ".RDS")))
+  saveRDS(fit_loo, loo_filename)
   
+  # log_lik
+  log_lik <- fit$draws(format = "df") |>
+              as_tibble() |>
+              select(starts_with('.'), starts_with("log_lik"))
+  saveRDS(log_lik, loglik_filename)
+
   # draws
-  draws <- fit$draws(format = "df") |> 
+  draws <- fit$draws(format = "df") |>
            as_tibble() |>
            select(-starts_with("log_lik"))
-  
-  saveRDS(draws,  fs::path("Draws/exp2-five-objects", paste0("draws_", model_names[im], ".RDS")))
+
+  saveRDS(draws, draws_filename)
 }
 ```
