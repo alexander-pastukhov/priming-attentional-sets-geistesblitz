@@ -28,14 +28,8 @@ results <-
                             player.rt = col_double(),
                             player.response = col_character(),
                             player.block = col_double(),
-                            player.trial = col_double(),
-                            session.is_demo = col_logical()
+                            player.trial = col_double()
                           )) |>
-
-  # drop demo sessions
-  filter(!session.is_demo) |>
-  select(-session.is_demo) |>
-  
   # drop player. prefix
   rename_with(~stringr::str_remove(., "player.")) |>
   
@@ -74,6 +68,15 @@ saveRDS(results, file = "Data/exp1-three-objects/exp1.RDS")
 ## Preparing data for stan
 
 ```{r}
+is_target <- matrix(0, nrow = nrow(results), ncol = length(levels(results$target)))
+for(irow in 1:nrow(results)) {
+  # target and its color
+  is_target[irow, as.integer(results$target[irow])] <- 1
+}
+```
+
+
+```{r}
 data_for_stan <-
   list(
     FITTING_START_TRIAL = 5,
@@ -90,7 +93,9 @@ data_for_stan <-
     correct = as.integer(results$Correct),
     participant = as.integer(results$participant.code),
     mixed_block = as.integer(results$BlockAttentionSet == "Mixed"),
-    trial_attention_set = as.integer(results$TrialAttentionSet)
+    trial_attention_set = as.integer(results$TrialAttentionSet),
+    is_direct_attention_set = as.integer(results$TrialAttentionSet == "Direct"),
+    is_target = is_target
   )
 saveRDS(data_for_stan, file = "Data/exp1-three-objects/exp1-standata.RDS")
 ```
