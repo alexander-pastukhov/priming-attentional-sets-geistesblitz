@@ -1,0 +1,143 @@
+---
+title: "Figures for manuscript"
+format: html
+---
+
+```{r}
+library(tidyverse)
+
+library(ggh4x)
+library(glue)
+```
+
+
+```{r}
+trial_block_attention_levels <- c(
+  "Direct only" = "Direct-Direct",
+  "Direct, mixed blocx" = "Direct-Mixed",
+  "Indirect only" = "Indirect-Indirect",
+  "Indirect, mixed block" = "Indirect-Mixed")
+```
+
+```{r}
+four_colors <- c("#f8766dff", "#7cae00ff", "#00bfc4ff", "#c77cffff")
+mixed_colors <- c("#7cae00ff",  "#c77cffff")
+```
+
+
+Creating subfolder for figures, if necessary
+```{r}
+if (!fs::file_exists("Figures")) {
+  fs::dir_create("Figures")
+}
+```
+
+## Figure on repetition of both object and attention set
+
+```{r}
+set_and_obj_predictions <- 
+  map_dfr(1:3, ~readRDS(glue("Averages/object-and-set-exp{.}-posterior.RDS"))) |>
+  mutate(TrialBlockAttentionSet = factor(TrialBlockAttentionSet, levels = trial_block_attention_levels, labels = names(trial_block_attention_levels)))
+
+set_and_obj_resampled <-
+  map_dfr(1:3, ~readRDS(glue("Averages/object-and-set-exp{.}-bootstrap.RDS"))) |>
+  mutate(TrialBlockAttentionSet = factor(TrialBlockAttentionSet, levels = trial_block_attention_levels, labels = names(trial_block_attention_levels)))
+
+ggplot(set_and_obj_resampled, aes(x = RepetitionObject, y = Avg, color = TrialBlockAttentionSet)) +
+  geom_ribbon(data = set_and_obj_predictions,
+              aes(ymin = LowerCI, ymax = UpperCI, fill = TrialBlockAttentionSet), alpha = 0.25, color = NA) +
+  geom_line() +
+  geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI), width = 0.2) +
+  geom_point() +
+  xlab(paste0("Object and set repeat")) +
+  ylab("RT, geometric mean [s]") +
+  theme(legend.position = "none") +# , strip.background = element_blank(), strip.text = element_blank()) +
+  ggh4x::facet_grid2(TrialBlockAttentionSet ~ Experiment, scales = "free_y",  independent = "y")
+
+ggsave("Figures/set-and-object-repetition.svg", units = "cm", width = 12, height = 16)
+ggsave("Figures/set-and-object-repetition.png", units = "cm", width = 12, height = 16)
+```
+
+## Figure on repetition of object but not attention set
+
+```{r}
+obj_not_set_predictions <- 
+  map_dfr(1:3, ~readRDS(glue("Averages/object-not-set-exp{.}-posterior.RDS"))) |>
+  mutate(TrialBlockAttentionSet = factor(TrialBlockAttentionSet, levels = trial_block_attention_levels, labels = names(trial_block_attention_levels)))
+
+obj_not_set_resampled <-
+  map_dfr(1:3, ~readRDS(glue("Averages/object-not-set-exp{.}-bootstrap.RDS"))) |>
+  mutate(TrialBlockAttentionSet = factor(TrialBlockAttentionSet, levels = trial_block_attention_levels, labels = names(trial_block_attention_levels)))
+
+ggplot(obj_not_set_resampled, aes(x = RepetitionObject, y = Avg, color = TrialBlockAttentionSet)) +
+  geom_ribbon(data = obj_not_set_predictions,
+              aes(ymin = LowerCI, ymax = UpperCI, fill = TrialBlockAttentionSet), alpha = 0.25, color = NA) +
+  geom_line() +
+  geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI), width = 0.2) +
+  geom_point() +
+  xlab(paste0("Object repeats, attention set changes")) +
+  ylab("RT, geometric mean [s]") +
+  theme(legend.position = "none") +# , strip.background = element_blank(), strip.text = element_blank()) +
+  ggh4x::facet_grid2(TrialBlockAttentionSet ~ Experiment, scales = "free_y",  independent = "y") +
+  scale_color_manual(values = mixed_colors) +
+  scale_fill_manual(values = mixed_colors)
+
+ggsave("Figures/object-not-set-repetition.svg", units = "cm", width = 12, height = 9)
+ggsave("Figures/object-not-set-repetition.png", units = "cm", width = 12, height = 9)
+```
+
+## Figure on repetition of attention set  but not object
+
+```{r}
+set_not_obj_predictions <- 
+  map_dfr(1:3, ~readRDS(glue("Averages/set-not-object-exp{.}-posterior.RDS"))) |>
+  mutate(TrialBlockAttentionSet = factor(TrialBlockAttentionSet, levels = trial_block_attention_levels, labels = names(trial_block_attention_levels)))
+
+set_not_obj_resampled <-
+  map_dfr(1:3, ~readRDS(glue("Averages/set-not-object-exp{.}-bootstrap.RDS"))) |>
+  mutate(TrialBlockAttentionSet = factor(TrialBlockAttentionSet, levels = trial_block_attention_levels, labels = names(trial_block_attention_levels)))
+
+ggplot(set_not_obj_resampled, aes(x = RepetitionSet, y = Avg, color = TrialBlockAttentionSet)) +
+  geom_ribbon(data = set_not_obj_predictions,
+              aes(ymin = LowerCI, ymax = UpperCI, fill = TrialBlockAttentionSet), alpha = 0.25, color = NA) +
+  geom_line() +
+  geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI), width = 0.2) +
+  geom_point() +
+  xlab(paste0("Attention set repeats, object changes")) +
+  ylab("RT, geometric mean [s]") +
+  theme(legend.position = "none") +# , strip.background = element_blank(), strip.text = element_blank()) +
+  ggh4x::facet_grid2(TrialBlockAttentionSet ~ Experiment, scales = "free_y",  independent = "y") +
+  scale_color_manual(values = mixed_colors) +
+  scale_fill_manual(values = mixed_colors)
+
+ggsave("Figures/set-not-object-repetition.svg", units = "cm", width = 12, height = 9)
+ggsave("Figures/set-not-object-repetition.png", units = "cm", width = 12, height = 9)
+```
+
+
+## Figure on repetition of attention set and color but not object
+
+```{r}
+color_and_set_not_obj_predictions <- 
+  map_dfr(2:3, ~readRDS(glue("Averages/color-and-set-not-object-exp{.}-posterior.RDS"))) |>
+  mutate(TrialBlockAttentionSet = factor(TrialBlockAttentionSet, levels = trial_block_attention_levels, labels = names(trial_block_attention_levels)))
+
+color_and_set_not_object_resampled <-
+  map_dfr(2:3, ~readRDS(glue("Averages/color-and-set-not-object-exp{.}-bootstrap.RDS"))) |>
+  mutate(TrialBlockAttentionSet = factor(TrialBlockAttentionSet, levels = trial_block_attention_levels, labels = names(trial_block_attention_levels)))
+
+ggplot(color_and_set_not_object_resampled, aes(x = RepetitionColor, y = Avg, color = TrialBlockAttentionSet)) +
+  geom_ribbon(data = color_and_set_not_obj_predictions,
+              aes(ymin = LowerCI, ymax = UpperCI, fill = TrialBlockAttentionSet), alpha = 0.25, color = NA) +
+  geom_line() +
+  geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI), width = 0.2) +
+  geom_point() +
+  xlab(paste0("Color and set repeat, object changes")) +
+  ylab("RT, geometric mean [s]") +
+  theme(legend.position = "none") +# , strip.background = element_blank(), strip.text = element_blank()) +
+  ggh4x::facet_grid2(TrialBlockAttentionSet ~ Experiment, scales = "free_y",  independent = "y")
+
+ggsave("Figures/color-and-set-not-object-repetition.svg", units = "cm", width = 10, height = 16)
+ggsave("Figures/color-and-set-not-object-repetition.png", units = "cm", width = 10, height = 16)
+```
+
