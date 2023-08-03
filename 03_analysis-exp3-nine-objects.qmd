@@ -1,0 +1,319 @@
+---
+title: "Analysis. Experiment 3: nine game objects."
+format: html
+---
+
+```{r}
+#| warning: false
+#| message: false
+library(tidyverse)
+
+library(cmdstanr)
+library(glue)
+library(loo)
+library(progress)
+
+source("common.R")
+```
+
+## Comparing models via LOO
+
+```{r}
+# load precomputed LOO
+loo_files <- fs::dir_ls("Loos/exp3-nine-objects", type = "file", glob = "*loo_exp3_*.RDS")
+model_names <- 
+  loo_files |>
+  fs::path_file() |>
+  fs::path_ext_remove() |>
+  stringr::str_remove("loo_exp3_")
+loos <- purrr::map(loo_files, ~readRDS(.))
+names(loos) <- model_names
+
+model_comparison <- compute_loo_summary_df(loos)
+model_comparison
+```
+
+## Getting draws for the selected model
+
+```{r}
+selected_model <- "[set-memory]_[obj-common]_[color-perset]"
+draws_filename <- glue::glue("Draws/exp3-nine-objects/draws_exp3_{selected_model}.RDS")
+
+if (fs::file_exists(draws_filename)) {
+  draws <- readRDS(draws_filename)  
+} else {
+  stop("No file with sampled draws. Please fit the model (execute the chunk below) or contact authors for sampled draws.")
+}
+```
+
+Emergency sampling if draws file is missing, disabled by default. Please note that the sampling could take at least a few hours.
+```{r eval=FALSE}
+stan_data <- readRDS("Data/exp3-nine-objects/exp3-standata.RDS")
+
+model <- cmdstan_model(glue::glue("Stan/exp3-nine-objects/{selected_model}.stan"))
+
+fit <- model$sample(data = data_for_stan, chains = 4, parallel_chains = future::availableCores())
+
+draws <- fit$draws(format = "df") |> 
+         as_tibble() |>
+         select(-starts_with("log_lik"))
+```
+
+Extract predictions for log(RT) for posterior predictions
+```{r}
+# extract predictions for log(RT)
+predicted_logRT <-
+  draws |>
+  select(starts_with("logMu["))
+```
+
+
+Loading posterior log-Likelihood. This is required to (re)compute LOO values for various subsets of trials but assumes that all sampled log likelihood values are stored in *LogLik* folder.
+```{r}
+#|eval: false
+log_lik <- purrr::map(model_names, ~readRDS(glue("LogLik/exp3-nine-objects/loglik_exp3_{.}.RDS")), progress = TRUE)
+names(log_lik) <- model_names
+```
+
+
+## Import data and compute repetitions
+
+```{r}
+results <- 
+  readRDS("Data/exp3-nine-objects/exp3.RDS") |>
+  
+  # compute repetition counts per block
+  group_by(participant.code, block) |>
+  mutate(RepetitionObject = compute_repetitions(target),
+         RepetitionColor = compute_repetitions(target_color),
+         RepetitionSet = compute_repetitions(TrialAttentionSet)) |>
+  ungroup()
+```
+
+Adding log Likelihood index depending on the first fitted trial
+```{r}
+data_for_stan <- readRDS("Data/exp3-nine-objects/exp3-standata.RDS")
+results$iloglik <- NA
+ill <- 1
+for(irow in 1:nrow(results)) {
+  if (results$trial[irow] >= data_for_stan$FITTING_START_TRIAL) {
+    results$iloglik[irow] <- ill
+    ill <- ill + 1
+  }
+}
+```
+
+## Repetition priming: real vs. ideal observers
+
+```{r}
+Rpredict <- NULL # NULL (all) for final
+Rsample <- 2000  # 2000 for final
+```
+
+### Repetition of both object and set
+
+```{r}
+object_and_set_repetition_filter <- function(df) {
+  filter(df, RepetitionObject <= 3, RepetitionObject <= RepetitionSet, trial >= data_for_stan$FITTING_START_TRIAL)
+}
+```
+
+Group averages
+```{r}
+if (fs::file_exists("Averages/object-and-set-exp3-posterior.RDS")) {
+  avg_prediction_object_and_set_per_group <- readRDS("Averages/object-and-set-exp3-posterior.RDS")
+} else {
+  avg_prediction_object_and_set_per_group <- compute_average_predicted_repetition("Object", object_and_set_repetition_filter, "group", R=Rpredict)
+  saveRDS(avg_prediction_object_and_set_per_group |> add_column(Experiment = "Experiment 3"),
+          "Averages/object-and-set-exp3-posterior.RDS")
+}
+
+if (fs::file_exists("Averages/object-and-set-exp3-bootstrap.RDS")) {
+  avg_bootstrap_object_and_set_per_group <- readRDS("Averages/object-and-set-exp3-bootstrap.RDS")
+} else {
+  avg_bootstrap_object_and_set_per_group <- sample_average_repetition("Object", object_and_set_repetition_filter, "group", R=Rsample)
+  saveRDS(avg_bootstrap_object_and_set_per_group |> add_column(Experiment = "Experiment 3"),
+          "Averages/object-and-set-exp3-bootstrap.RDS")
+}
+
+plot_repetition("Repetition of object and set",
+                "Object",
+                avg_prediction_object_and_set_per_group,
+                avg_bootstrap_object_and_set_per_group,
+                level = "group")
+```
+
+
+```{r}
+if (fs::file_exists("Loos/exp3-nine-objects/loo_object_and_set.RDS")) {
+  loo_object_and_set <- readRDS("Loos/exp3-nine-objects/loo_object_and_set.RDS")
+} else {
+  loo_object_and_set <- loo_using_filter(results, log_lik, object_and_set_repetition_filter)
+  saveRDS(loo_object_and_set, "Loos/exp3-nine-objects/loo_object_and_set.RDS")
+}
+
+if (fs::file_exists("Loos/exp3-nine-objects/loo_object_and_set_table.RDS")) {
+  loo_object_and_set_table <- readRDS("Loos/exp3-nine-objects/loo_object_and_set_table.RDS")  
+} else {
+  loo_object_and_set_table <- compute_loo_summary_df(loo_object_and_set)
+  saveRDS(loo_object_and_set_table, "Loos/exp3-nine-objects/loo_object_and_set_table.RDS")
+}
+  
+loo_object_and_set_table
+```
+
+### Object repeats, set changes
+
+```{r}
+object_not_set_repetition_filter <- function(df) {
+  filter(df, RepetitionObject <= 3, RepetitionSet == 0, trial >= data_for_stan$FITTING_START_TRIAL)
+}
+```
+
+Group averages
+```{r}
+if (fs::file_exists("Averages/object-not-set-exp3-posterior.RDS")) {
+  avg_prediction_object_not_set_per_group <- readRDS("Averages/object-not-set-exp3-posterior.RDS")  
+} else {
+  avg_prediction_object_not_set_per_group <- compute_average_predicted_repetition("Object", object_not_set_repetition_filter, "group", R=Rpredict)
+  saveRDS(avg_prediction_object_not_set_per_group |> add_column(Experiment = "Experiment 3"),
+          "Averages/object-not-set-exp3-posterior.RDS")
+}
+
+if (fs::file_exists("Averages/object-not-set-exp3-bootstrap.RDS")) {
+  avg_bootstrap_object_not_set_per_group <- readRDS("Averages/object-not-set-exp3-bootstrap.RDS")
+} else {
+  avg_bootstrap_object_not_set_per_group <- sample_average_repetition("Object", object_not_set_repetition_filter, "group", R=Rsample)
+  saveRDS(avg_bootstrap_object_not_set_per_group |> add_column(Experiment = "Experiment 3"),
+          "Averages/object-not-set-exp3-bootstrap.RDS")
+}
+  
+plot_repetition("Repetition of object not set",
+                "Object",
+                avg_prediction_object_not_set_per_group,
+                avg_bootstrap_object_not_set_per_group,
+                level = "group")
+```
+
+```{r}
+if (fs::file_exists("Loos/exp3-nine-objects/loo_object_and_set.RDS")) {
+  loo_object_not_set <- readRDS("Loos/exp3-nine-objects/loo_object_and_set.RDS")  
+} else {
+  loo_object_not_set <- loo_using_filter(results, log_lik, object_not_set_repetition_filter)
+  saveRDS(loo_object_not_set, "Loos/exp3-nine-objects/loo_object_and_set.RDS")
+}
+  
+if (fs::file_exists("Loos/exp3-nine-objects/loo_object_and_set_table.RDS")) {
+  loo_object_not_set_table <- readRDS("Loos/exp3-nine-objects/loo_object_and_set_table.RDS")
+} else {
+  loo_object_not_set_table <- compute_loo_summary_df(loo_object_not_set)
+  saveRDS(loo_object_not_set_table, "Loos/exp3-nine-objects/loo_object_and_set_table.RDS")
+}
+  
+loo_object_not_set_table
+```
+
+### Object changes, set repeats
+
+```{r}
+set_not_object_repetition_filter <- function(df) {
+  filter(df, RepetitionObject == 0, RepetitionSet <= 3, trial >= data_for_stan$FITTING_START_TRIAL)
+}
+```
+
+
+Group averages
+```{r}
+if (fs::file_exists("Averages/set-not-object-exp3-posterior.RDS")) {
+  avg_prediction_set_not_object_per_group <- readRDS("Averages/set-not-object-exp3-posterior.RDS")
+} else {
+  avg_prediction_set_not_object_per_group <- compute_average_predicted_repetition("Set", set_not_object_repetition_filter, "group", R=Rpredict)
+  saveRDS(avg_prediction_set_not_object_per_group |> add_column(Experiment = "Experiment 3"),
+          "Averages/set-not-object-exp3-posterior.RDS")
+}
+  
+if (fs::file_exists("Averages/set-not-object-exp3-bootstrap.RDS")) {
+  avg_bootstrap_set_not_object_per_group <- readRDS("Averages/set-not-object-exp3-bootstrap.RDS")  
+} else {
+  avg_bootstrap_set_not_object_per_group <- sample_average_repetition("Set", set_not_object_repetition_filter, "group", R=Rsample)
+  saveRDS(avg_bootstrap_set_not_object_per_group |> add_column(Experiment = "Experiment 3"),
+          "Averages/set-not-object-exp3-bootstrap.RDS")
+}
+
+plot_repetition("Repetition of set not object",
+                "Set",
+                avg_prediction_set_not_object_per_group,
+                avg_bootstrap_set_not_object_per_group,
+                level = "group")
+```
+
+```{r}
+if (fs::file_exists("Loos/exp3-nine-objects/loo_set_not_object.RDS")) {
+  loo_set_not_object <- readRDS("Loos/exp3-nine-objects/loo_set_not_object.RDS")
+} else {
+  loo_set_not_object <- loo_using_filter(results, log_lik, set_not_object_repetition_filter)
+  saveRDS(loo_set_not_object, "Loos/exp3-nine-objects/loo_set_not_object.RDS")
+}
+
+if (fs::file_exists("Loos/exp3-nine-objects/loo_set_not_object_table.RDS")) {
+  loo_set_not_object_table <- readRDS("Loos/exp3-nine-objects/loo_set_not_object_table.RDS")
+} else {
+  loo_set_not_object_table <- compute_loo_summary_df(loo_set_not_object)
+  saveRDS(loo_set_not_object_table, "Loos/exp3-nine-objects/loo_set_not_object_table.RDS")
+}
+
+loo_set_not_object_table
+```
+
+### Object changes, color and set repeat
+
+```{r}
+color_and_set_not_object_repetition_filter <- function(df) {
+  filter(df, RepetitionObject == 0, RepetitionColor <= 3, RepetitionColor <= RepetitionSet, trial >= data_for_stan$FITTING_START_TRIAL)
+}
+```
+
+Group averages
+```{r}
+if (fs::file_exists("Averages/color-and-set-not-object-exp3-posterior.RDS")) {
+  avg_prediction_color_and_set_not_object_per_group <- readRDS("Averages/color-and-set-not-object-exp3-posterior.RDS")
+} else {
+  avg_prediction_color_and_set_not_object_per_group <- compute_average_predicted_repetition("Color", color_and_set_not_object_repetition_filter, "group", R=Rpredict)
+  saveRDS(avg_prediction_color_and_set_not_object_per_group |> add_column(Experiment = "Experiment 3"),
+          "Averages/color-and-set-not-object-exp3-posterior.RDS")
+}
+
+if (fs::file_exists("Averages/color-and-set-not-object-exp3-bootstrap.RDS")) {
+  avg_bootstrap_color_and_set_not_object_per_group <- readRDS("Averages/color-and-set-not-object-exp3-bootstrap.RDS")
+} else {
+  avg_bootstrap_color_and_set_not_object_per_group <- sample_average_repetition("Color", color_and_set_not_object_repetition_filter, "group", R=Rsample)
+  saveRDS(avg_bootstrap_color_and_set_not_object_per_group  |> add_column(Experiment = "Experiment 3"),
+          "Averages/color-and-set-not-object-exp3-bootstrap.RDS")
+}
+
+plot_repetition("Repetition of color and set, not object",
+                "Color",
+                avg_prediction_color_and_set_not_object_per_group,
+                avg_bootstrap_color_and_set_not_object_per_group,
+                level = "group")
+```
+
+
+```{r}
+if (fs::file_exists("Loos/exp3-nine-objects/loo_color_and_set_not_object.RDS")) {
+  loo_color_and_set_not_object <- readRDS("Loos/exp3-nine-objects/loo_color_and_set_not_object.RDS")
+} else {
+  loo_color_and_set_not_object <- loo_using_filter(results, log_lik, color_and_set_not_object_repetition_filter)
+  saveRDS(loo_color_and_set_not_object, "Loos/exp3-nine-objects/loo_color_and_set_not_object.RDS")
+}
+
+if (fs::file_exists("Loos/exp3-nine-objects/loo_color_and_set_not_object_table.RDS")) {
+  loo_color_and_set_not_object_table <- readRDS("Loos/exp3-nine-objects/loo_color_and_set_not_object_table.RDS")
+} else {
+  loo_color_and_set_not_object_table <- compute_loo_summary_df(loo_color_and_set_not_object)
+  saveRDS(loo_color_and_set_not_object_table, "Loos/exp3-nine-objects/loo_color_and_set_not_object_table.RDS")
+}
+
+loo_color_and_set_not_object_table
+```
+
