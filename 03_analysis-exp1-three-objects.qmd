@@ -58,12 +58,9 @@ clipr::write_clip(model_comparison)
 ```{r}
 selected_model <- "[set-memory]_[obj-perset]"
 draws_filename <- glue("Draws/exp1-three-objects/draws_exp1_{selected_model}.RDS")
-log_lik_filename <- glue("LogLik/exp1-three-objects/loglik_exp1_{selected_model}.RDS")
 
 if (fs::file_exists(draws_filename)) {
   draws <- readRDS(draws_filename)
-  log_lik <- readRDS(log_lik_filename)
-  
 } else {
   stop("No file with sampled draws. Please fit the model (execute the chunk below) or contact authors for sampled draws.")
 }
