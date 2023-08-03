@@ -9,30 +9,34 @@ format: html
 library(tidyverse)
 
 library(cmdstanr)
+library(glue)
+
+FORCE_RESAMPLE <- FALSE
 ```
 
 ## Import proprocessed data
 ```{r}
-stan_data <- readRDS("Data/exp1-three-objects/exp1-standata.RDS")
+data_for_stan <- readRDS("Data/exp1-three-objects/exp1-standata.RDS")
 ```
 
 
 ## Compiling the models
 ```{r}
-model_names <- c("[set-none]_[objrepr-common]_[objdelta-common]",
-                 "[set-none]_[objrepr-common]_[objdelta-perset]",
-                 "[set-none]_[objrepr-perset]_[objdelta-common]",
-                 "[set-none]_[objrepr-perset]_[objdelta-perset]",
-                 
-                 "[set-fixed_common]_[objrepr-perset]_[objdelta-common]",
-                 
-                 "[set-fixed_perset]_[objrepr_perset]_[objdelta-common]",
-                 
-                 "[set-history_objdelta]_[objrepr-perset]_[objdelta-common]",
-                 "[set-history_setdelta]_[objrepr-perset]_[objdelta-common]",
-                 "[set-history_setdelta]_[objrepr-perset]_[objdelta-perset]")
+model_names <- c("[set-none]_[obj-common]",
+                 "[set-none]_[obj-perset]",
 
-models <- purrr::map(model_names, ~cmdstan_model(paste0("Stan/exp1-three-objects/", ., ".stan")))
+                 "[set-same]_[obj-common]",
+                 "[set-same]_[obj-perset]",
+
+                 "[set-different]_[obj-common]",
+                 "[set-different]_[obj-perset]",
+
+                 "[set-memory]_[obj-common]",
+                 "[set-memory]_[obj-perset]")
+
+models <- purrr::map(model_names,
+                     ~cmdstan_model(glue("Stan/exp1-three-objects/{.}.stan"),
+                                    exe_file = glue("Stan/exp1-three-objects/exe/{.}.exe")))
 names(models) <- model_names
 ```
 
@@ -40,20 +44,36 @@ names(models) <- model_names
 ```{r}
 for(im in 1:length(model_names)) {
   cat(model_names[im], "\n")
+  loo_filename <- fs::path("Loos/exp1-three-objects", glue("loo_exp1_{model_names[im]}.RDS"))
+  loglik_filename <- fs::path("LogLik/exp1-three-objects", glue("loglik_exp1_{model_names[im]}.RDS"))
+  draws_filename <- fs::path("Draws/exp1-three-objects", glue("draws_exp1_{model_names[im]}.RDS")) 
+  
+  if (fs::file_exists(loo_filename) & fs::file_exists(draws_filename) & !FORCE_RESAMPLE){
+    cat("    Already sampled, skipping...\n")
+    next
+  } 
+  
   fit <- models[[im]]$sample(data = data_for_stan,
                              chains = 4,
                              parallel_chains = future::availableCores())
-  
+
   # loo
   fit_loo <- fit$loo()
-  saveRDS(fit_loo,  fs::path("Loos/exp1-three-objects", paste0("loo_", model_names[im], ".RDS")))
-  
+  saveRDS(fit_loo, loo_filename)
+
   # draws
-  draws <- fit$draws(format = "df") |> 
+  draws <- fit$draws(format = "df") |>
            as_tibble() |>
            select(-starts_with("log_lik"))
   
-  saveRDS(draws,  fs::path("Draws/exp1-three-objects", paste0("draws_", model_names[im], ".RDS")))
+  # log_lik
+  log_lik <- fit$draws(format = "df") |>
+              as_tibble() |>
+              select(starts_with('.'), starts_with("log_lik"))
+  saveRDS(log_lik, loglik_filename)
+
+
+  saveRDS(draws, draws_filename)
 }
 ```
 
